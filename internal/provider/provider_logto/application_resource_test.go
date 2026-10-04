@@ -1,12 +1,16 @@
 package provider_logto
 
 import (
+	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccApplicationResourceWithoutTypeUpdate(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -60,6 +64,9 @@ func TestAccApplicationResourceWithoutTypeUpdate(t *testing.T) {
 }
 
 func TestAccApplicationResourceWithTypeUpdate(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -113,6 +120,9 @@ func TestAccApplicationResourceWithTypeUpdate(t *testing.T) {
 }
 
 func TestAccApplicationResourceWithRedirectUrisAndNotPostLogoutRedirectUris(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -177,6 +187,9 @@ func TestAccApplicationResourceWithRedirectUrisAndNotPostLogoutRedirectUris(t *t
 }
 
 func TestAccApplicationResourceWithRedirectUrisAndPostLogoutRedirectUris(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -254,6 +267,9 @@ func TestAccApplicationResourceWithRedirectUrisAndPostLogoutRedirectUris(t *test
 }
 
 func TestAccApplicationResourceWithNotRedirectUrisAndPostLogoutRedirectUris(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -324,6 +340,9 @@ func TestAccApplicationResourceWithNotRedirectUrisAndPostLogoutRedirectUris(t *t
 }
 
 func TestAccApplicationResourceWithCorsAllowedOrigins(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{

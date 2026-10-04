@@ -1,12 +1,16 @@
 package provider_logto
 
 import (
+	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccRoleRessource(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -60,6 +64,9 @@ func TestAccRoleRessource(t *testing.T) {
 }
 
 func TestAccRoleRessourceRecreation(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -165,6 +172,9 @@ func TestAccRoleRessourceRecreation(t *testing.T) {
 }
 
 func TestAccRoleRessourceAddScopeIdsAfterCreation(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{

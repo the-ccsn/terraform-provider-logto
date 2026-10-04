@@ -8,7 +8,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/numberdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/numberplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -29,7 +31,10 @@ func ApiResourceResourceSchema(ctx context.Context) schema.Schema {
 				Computed:            true,
 				Description:         "The access token TTL in seconds. It affects the `exp` claim of the access token granted for this resource.",
 				MarkdownDescription: "The access token TTL in seconds. It affects the `exp` claim of the access token granted for this resource.",
-				Default:             numberdefault.StaticBigFloat(big.NewFloat(3600)),
+				PlanModifiers: []planmodifier.Number{
+					numberplanmodifier.UseStateForUnknown(),
+				},
+				Default: numberdefault.StaticBigFloat(big.NewFloat(3600)),
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -52,6 +57,9 @@ func ApiResourceResourceSchema(ctx context.Context) schema.Schema {
 			},
 			"is_default": schema.BoolAttribute{
 				Computed: true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
@@ -125,6 +133,13 @@ func (t ScopesType) String() string {
 }
 
 func (t ScopesType) ValueFromObject(ctx context.Context, in basetypes.ObjectValue) (basetypes.ObjectValuable, diag.Diagnostics) {
+	if in.IsNull() {
+		return NewScopesValueNull(), nil
+	}
+	if in.IsUnknown() {
+		return NewScopesValueUnknown(), nil
+	}
+
 	var diags diag.Diagnostics
 
 	attributes := in.Attributes()

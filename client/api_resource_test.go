@@ -10,6 +10,9 @@ import (
 )
 
 func TestApiResource(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("live Logto test; set TF_ACC=1 explicitly")
+	}
 	ctx := context.Background()
 	config := DefaultConfig()
 	config.Logger = zerolog.New(os.Stdout)

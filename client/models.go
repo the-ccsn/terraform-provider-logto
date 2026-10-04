@@ -51,10 +51,10 @@ type UserModel struct {
 }
 
 type Profile struct {
-	FamilyName string `json:"familyName,omitempty"`
-	GivenName  string `json:"givenName,omitempty"`
-	MiddleName string `json:"middleName,omitempty"`
-	Nickname   string `json:"nickname,omitempty"`
+	FamilyName string `json:"familyName"`
+	GivenName  string `json:"givenName"`
+	MiddleName string `json:"middleName"`
+	Nickname   string `json:"nickname"`
 }
 
 type Secret struct {

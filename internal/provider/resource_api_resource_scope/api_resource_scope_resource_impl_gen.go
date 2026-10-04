@@ -9,8 +9,8 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                = &apiResourceScopeResource{}
-	_ resource.ResourceWithConfigure   = &apiResourceScopeResource{}
+	_ resource.Resource              = &apiResourceScopeResource{}
+	_ resource.ResourceWithConfigure = &apiResourceScopeResource{}
 )
 
 type apiResourceScopeResource struct {
@@ -39,5 +39,3 @@ func (r *apiResourceScopeResource) Configure(_ context.Context, req resource.Con
 	}
 	r.client = client
 }
-
-

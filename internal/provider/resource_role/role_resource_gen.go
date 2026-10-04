@@ -5,7 +5,7 @@ package resource_role
 import (
 	"context"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -34,6 +34,9 @@ func RoleResourceSchema(ctx context.Context) schema.Schema {
 			"is_default": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
@@ -46,11 +49,8 @@ func RoleResourceSchema(ctx context.Context) schema.Schema {
 			"scope_ids": schema.ListAttribute{
 				ElementType:         types.StringType,
 				Optional:            true,
-				Description:         "The initial API resource scopes assigned to the role.",
-				MarkdownDescription: "The initial API resource scopes assigned to the role.",
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.RequiresReplace(),
-				},
+				Description:         "API resource scopes assigned to the role. An empty list revokes all scopes; omission leaves them unmanaged.",
+				MarkdownDescription: "API resource scopes assigned to the role. An empty list revokes all scopes; omission leaves them unmanaged.",
 			},
 			"type": schema.StringAttribute{
 				Optional:            true,
@@ -58,6 +58,7 @@ func RoleResourceSchema(ctx context.Context) schema.Schema {
 				Description:         "The type of the role. It cannot be changed after creation.",
 				MarkdownDescription: "The type of the role. It cannot be changed after creation.",
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 				Validators: []validator.String{

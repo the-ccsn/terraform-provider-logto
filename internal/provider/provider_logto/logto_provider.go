@@ -2,6 +2,7 @@ package provider_logto
 
 import (
 	"context"
+	"github.com/Lenstra/terraform-provider-logto/internal/provider/resource_application_secret"
 	"os"
 
 	"github.com/Lenstra/terraform-provider-logto/internal/provider/resource_api_resource"
@@ -157,7 +158,6 @@ func (p *logtoProvider) Configure(ctx context.Context, req provider.ConfigureReq
 
 	ctx = tflog.SetField(ctx, "logto_hostname", hostname)
 	ctx = tflog.SetField(ctx, "logto_application_id", applicationID)
-	ctx = tflog.SetField(ctx, "logto_application_secret", applicationSecret)
 
 	tflog.Debug(ctx, "Creating Logto client")
 
@@ -195,6 +195,7 @@ func (p *logtoProvider) DataSources(_ context.Context) []func() datasource.DataS
 func (p *logtoProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		resource_application.ApplicationResource,
+		resource_application_secret.New,
 		resource_user.UserResource,
 		resource_api_resource.ApiResourceResource,
 		resource_api_resource_scope.ApiResourceScopeResource,

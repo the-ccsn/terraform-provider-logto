@@ -19,6 +19,7 @@ func LogtoProviderSchema(ctx context.Context) schema.Schema {
 			},
 			"application_secret": schema.StringAttribute{
 				Optional:            true,
+				Sensitive:           true,
 				Description:         "The application secret for your instance, can be set as environment variable LOGTO_APPLICATION_SECRET.",
 				MarkdownDescription: "The application secret for your instance, can be set as environment variable LOGTO_APPLICATION_SECRET.",
 			},

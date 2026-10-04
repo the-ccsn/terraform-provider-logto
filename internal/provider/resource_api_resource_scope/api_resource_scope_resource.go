@@ -46,6 +46,12 @@ func (r *apiResourceScopeResource) Read(ctx context.Context, req resource.ReadRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Upjet observes a new resource before creation with an empty identifier.
+	// Treat only that uninitialized state as absent; malformed IDs still fail.
+	if state.Id.IsNull() || state.Id.IsUnknown() || state.Id.ValueString() == "" {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	if state.Id.IsNull() || state.Id.IsUnknown() {
 		resp.Diagnostics.AddError("Invalid Id", "Resource Id is null or unknown.")
@@ -56,23 +62,10 @@ func (r *apiResourceScopeResource) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 
-	queryParams := map[string]string{
-		"page":      "1",
-		"page_size": "20",
-	}
-
-	resourceScopes, err := r.client.ApiResourceScopesList(ctx, state.ResourceId.ValueString(), queryParams)
+	foundScope, err := r.client.ApiResourceScopeGet(ctx, state.ResourceId.ValueString(), state.Id.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Error reading api_resource_scopes", err.Error())
+		resp.Diagnostics.AddError("Error reading API resource scope", err.Error())
 		return
-	}
-
-	var foundScope *client.ScopeModel
-	for _, scope := range resourceScopes {
-		if scope.ID == state.Id.ValueString() {
-			foundScope = &scope
-			break
-		}
 	}
 
 	if foundScope == nil {
@@ -150,11 +143,7 @@ func convertToTerraformModel(apiResourceScope *client.ScopeModel, model *ApiReso
 		TenantId:   types.StringValue(apiResourceScope.TenantId),
 	}
 
-	if apiResourceScope.Description != "" {
-		model.Description = types.StringValue(apiResourceScope.Description)
-	} else {
-		model.Description = types.StringNull()
-	}
+	model.Description = types.StringValue(apiResourceScope.Description)
 
 	if apiResourceScope.CreatedAt != nil {
 		createdAtBigFloat := new(big.Float).SetFloat64(*apiResourceScope.CreatedAt)
@@ -166,7 +155,7 @@ func convertToTerraformModel(apiResourceScope *client.ScopeModel, model *ApiReso
 
 func (r *apiResourceScopeResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
-	if len(parts) != 2 {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		resp.Diagnostics.AddError(
 			"Unexpected import identifier",
 			"Expected format: <resource_id>/<scope_id>",

@@ -6,6 +6,7 @@ import (
 	"context"
 	"github.com/Lenstra/terraform-provider-logto/internal/provider/planmodifiers/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -17,6 +18,13 @@ import (
 func ApplicationResourceSchema(ctx context.Context) schema.Schema {
 	return schema.Schema{
 		Attributes: map[string]schema.Attribute{
+			"client_secrets": schema.MapAttribute{
+				ElementType:         types.StringType,
+				Computed:            true,
+				Sensitive:           true,
+				Description:         "Existing application client secrets, keyed by name. Store Terraform state securely.",
+				MarkdownDescription: "Existing application client secrets, keyed by name. Store Terraform state securely.",
+			},
 			"cors_allowed_origins": schema.ListAttribute{
 				ElementType: types.StringType,
 				Optional:    true,
@@ -28,6 +36,9 @@ func ApplicationResourceSchema(ctx context.Context) schema.Schema {
 			"description": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -43,6 +54,9 @@ func ApplicationResourceSchema(ctx context.Context) schema.Schema {
 			"is_third_party": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"name": schema.StringAttribute{
 				Required: true,
@@ -80,8 +94,6 @@ func ApplicationResourceSchema(ctx context.Context) schema.Schema {
 						"SPA",
 						"Traditional",
 						"MachineToMachine",
-						"Protected",
-						"SAML",
 					),
 				},
 			},
@@ -90,6 +102,7 @@ func ApplicationResourceSchema(ctx context.Context) schema.Schema {
 }
 
 type ApplicationModel struct {
+	ClientSecrets          types.Map    `tfsdk:"client_secrets"`
 	CorsAllowedOrigins     types.List   `tfsdk:"cors_allowed_origins"`
 	Description            types.String `tfsdk:"description"`
 	Id                     types.String `tfsdk:"id"`

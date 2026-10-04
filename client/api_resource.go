@@ -7,7 +7,7 @@ import (
 )
 
 func (c *Client) ApiResourceGet(ctx context.Context, id string) (*ApiResourceModel, error) {
-	if id == "" {
+	if !validID(id) {
 		return nil, errEmptyID
 	}
 
@@ -21,6 +21,7 @@ func (c *Client) ApiResourceGet(ctx context.Context, id string) (*ApiResourceMod
 	}
 
 	if res.StatusCode == 404 {
+		res.Body.Close()
 		return nil, nil
 	}
 
@@ -69,7 +70,7 @@ func (c *Client) ApiResourceCreate(ctx context.Context, apiResource *ApiResource
 }
 
 func (c *Client) ApiResourceDelete(ctx context.Context, id string) error {
-	if id == "" {
+	if !validID(id) {
 		return errEmptyID
 	}
 
@@ -77,11 +78,13 @@ func (c *Client) ApiResourceDelete(ctx context.Context, id string) error {
 		method: http.MethodDelete,
 		path:   path.Join("api/resources", id),
 	}
-	_, err := expect(204)(c.do(ctx, req))
-	return err
+	return c.discard(ctx, req, 204, 404)
 }
 
 func (c *Client) ApiResourceUpdate(ctx context.Context, apiResource *ApiResourceModel) (*ApiResourceModel, error) {
+	if apiResource == nil || !validID(apiResource.ID) {
+		return nil, errEmptyID
+	}
 	req := &request{
 		method: http.MethodPatch,
 		path:   path.Join("api/resources/", apiResource.ID),

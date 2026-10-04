@@ -9,6 +9,9 @@ import (
 )
 
 func (c *Client) ApiResourceScopesList(ctx context.Context, resourceId string, query_params map[string]string) ([]ScopeModel, error) {
+	if !validID(resourceId) {
+		return nil, errEmptyID
+	}
 	req := &request{
 		method:          http.MethodGet,
 		path:            path.Join("api/resources", resourceId, "scopes"),
@@ -29,10 +32,13 @@ func (c *Client) ApiResourceScopesList(ctx context.Context, resourceId string, q
 }
 
 func (c *Client) ApiResourceScopeCreate(ctx context.Context, resourceId string, scope *ScopeModel) (*ScopeModel, error) {
+	if !validID(resourceId) {
+		return nil, errEmptyID
+	}
 	req := &request{
 		method: http.MethodPost,
 		path:   path.Join("api/resources", resourceId, "scopes"),
-		body:   scope,
+		body:   map[string]any{"name": scope.Name, "description": scope.Description},
 	}
 
 	res, err := expect(201)(c.do(ctx, req))
@@ -49,7 +55,7 @@ func (c *Client) ApiResourceScopeCreate(ctx context.Context, resourceId string, 
 }
 
 func (c *Client) ApiResourceScopeDelete(ctx context.Context, resourceId string, scopeId string) error {
-	if resourceId == "" || scopeId == "" {
+	if !validID(resourceId) || !validID(scopeId) {
 		return errEmptyID
 	}
 
@@ -58,19 +64,18 @@ func (c *Client) ApiResourceScopeDelete(ctx context.Context, resourceId string, 
 		path:   path.Join("api/resources", resourceId, "scopes", scopeId),
 	}
 
-	_, err := expect(204)(c.do(ctx, req))
-	return err
+	return c.discard(ctx, req, 204, 404)
 }
 
 func (c *Client) ApiResourceScopeUpdate(ctx context.Context, scope *ScopeModel) (*ScopeModel, error) {
-	if scope.ResourceId == "" || scope.ID == "" {
+	if scope == nil || !validID(scope.ResourceId) || !validID(scope.ID) {
 		return nil, errEmptyID
 	}
 
 	req := &request{
 		method: http.MethodPatch,
 		path:   path.Join("api/resources", scope.ResourceId, "scopes", scope.ID),
-		body:   scope,
+		body:   map[string]any{"name": scope.Name, "description": scope.Description},
 	}
 
 	res, err := expect(200)(c.do(ctx, req))
@@ -83,4 +88,24 @@ func (c *Client) ApiResourceScopeUpdate(ctx context.Context, scope *ScopeModel) 
 		return nil, err
 	}
 	return &returnScope, nil
+}
+
+// ApiResourceScopeGet scans all pages. A truncated list must never imply deletion.
+func (c *Client) ApiResourceScopeGet(ctx context.Context, resourceID, scopeID string) (*ScopeModel, error) {
+	if !validID(resourceID) || !validID(scopeID) {
+		return nil, errEmptyID
+	}
+	scopes, err := listPages(ctx, c, path.Join("api/resources", resourceID, "scopes"), func(scope ScopeModel) string { return scope.ID })
+	if IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, scope := range scopes {
+		if scope.ID == scopeID {
+			return &scope, nil
+		}
+	}
+	return nil, nil
 }

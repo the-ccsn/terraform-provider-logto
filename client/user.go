@@ -2,12 +2,13 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path"
 )
 
 func (c *Client) UserGet(ctx context.Context, id string) (*UserModel, error) {
-	if id == "" {
+	if !validID(id) {
 		return nil, errEmptyID
 	}
 
@@ -21,6 +22,7 @@ func (c *Client) UserGet(ctx context.Context, id string) (*UserModel, error) {
 	}
 
 	if res.StatusCode == 404 {
+		res.Body.Close()
 		return nil, nil
 	}
 
@@ -51,7 +53,7 @@ func (c *Client) UserCreate(ctx context.Context, user *UserModel) (*UserModel, e
 }
 
 func (c *Client) UserDelete(ctx context.Context, id string) error {
-	if id == "" {
+	if !validID(id) {
 		return errEmptyID
 	}
 
@@ -59,19 +61,39 @@ func (c *Client) UserDelete(ctx context.Context, id string) error {
 		method: http.MethodDelete,
 		path:   "api/users/" + id,
 	}
-	_, err := expect(204)(c.do(ctx, req))
-	return err
+	return c.discard(ctx, req, 204, 404)
 }
 
 func (c *Client) UserUpdate(ctx context.Context, user *UserModel) (*UserModel, error) {
-	if user.ID == "" {
+	if user == nil || !validID(user.ID) {
 		return nil, errEmptyID
+	}
+
+	patch := map[string]any{"username": user.Username, "primaryEmail": user.PrimaryEmail, "name": user.Name}
+	if user.Profile != nil {
+		res, err := expect(200)(c.do(ctx, &request{method: http.MethodGet, path: "api/users/" + user.ID}))
+		if err != nil {
+			return nil, err
+		}
+		var current map[string]any
+		if err := decode(res.Body, &current); err != nil {
+			return nil, err
+		}
+		profile, _ := current["profile"].(map[string]any)
+		if profile == nil {
+			profile = map[string]any{}
+		}
+		profile["familyName"] = user.Profile.FamilyName
+		profile["givenName"] = user.Profile.GivenName
+		profile["middleName"] = user.Profile.MiddleName
+		profile["nickname"] = user.Profile.Nickname
+		patch["profile"] = profile
 	}
 
 	req := &request{
 		method: http.MethodPatch,
 		path:   "api/users/" + user.ID,
-		body:   user,
+		body:   patch,
 	}
 
 	res, err := expect(200)(c.do(ctx, req))
@@ -87,59 +109,65 @@ func (c *Client) UserUpdate(ctx context.Context, user *UserModel) (*UserModel, e
 }
 
 func (c *Client) GetRolesForUser(ctx context.Context, userId string) ([]RoleModel, error) {
-	if userId == "" {
+	if !validID(userId) {
 		return nil, errEmptyID
 	}
 
-	req := &request{
-		method: http.MethodGet,
-		path:   path.Join("api/users", userId, "roles"),
-	}
+	return listPages(ctx, c, path.Join("api/users", userId, "roles"), func(role RoleModel) string { return role.ID })
 
-	res, err := expect(200)(c.do(ctx, req))
-	if err != nil {
-		return nil, err
-	}
-
-	var returnRoles *[]RoleModel
-	if err := decode(res.Body, &returnRoles); err != nil {
-		return nil, err
-	}
-	return *returnRoles, nil
 }
 
 func (c *Client) AssignRolesForUser(ctx context.Context, roleIds *RoleIdsModel, userId string) error {
-	if userId == "" || len(roleIds.RoleIds) <= 0 {
+	if !validID(userId) || roleIds == nil {
 		return errEmptyID
 	}
 
 	req := &request{
 		method: http.MethodPost,
 		path:   path.Join("api/users", userId, "roles"),
-		body:   *roleIds,
+		body:   &RoleIdsModel{RoleIds: nonNil(roleIds.RoleIds)},
 	}
 
-	_, err := expect(201)(c.do(ctx, req))
-	return err
+	return c.discard(ctx, req, 201)
 }
 
 func (c *Client) UpdateRolesForUser(ctx context.Context, roleIds *RoleIdsModel, userId string) error {
-	if userId == "" || len(roleIds.RoleIds) <= 0 {
+	if !validID(userId) || roleIds == nil {
 		return errEmptyID
+	}
+	// Logto's replacement endpoint does not enforce RoleType.User. Its read
+	// endpoint filters other types, which would otherwise cause perpetual drift.
+	for _, id := range roleIds.RoleIds {
+		if !validID(id) {
+			return errEmptyID
+		}
+	}
+	checked := map[string]bool{}
+	for _, id := range roleIds.RoleIds {
+		if checked[id] {
+			continue
+		}
+		role, err := c.RoleGet(ctx, id)
+		if err != nil {
+			return err
+		}
+		if role == nil || role.Type != "User" {
+			return errors.New("user role assignments require existing roles of type User")
+		}
+		checked[id] = true
 	}
 
 	req := &request{
 		method: http.MethodPut,
 		path:   path.Join("api/users", userId, "roles"),
-		body:   roleIds,
+		body:   &RoleIdsModel{RoleIds: nonNil(roleIds.RoleIds)},
 	}
 
-	_, err := expect(200)(c.do(ctx, req))
-	return err
+	return c.discard(ctx, req, 200)
 }
 
 func (c *Client) DeleteRolesForUser(ctx context.Context, roleId string, userId string) error {
-	if userId == "" || roleId == "" {
+	if !validID(userId) || !validID(roleId) {
 		return errEmptyID
 	}
 
@@ -148,6 +176,5 @@ func (c *Client) DeleteRolesForUser(ctx context.Context, roleId string, userId s
 		path:   path.Join("api/users", userId, "roles", roleId),
 	}
 
-	_, err := expect(204)(c.do(ctx, req))
-	return err
+	return c.discard(ctx, req, 204, 404)
 }

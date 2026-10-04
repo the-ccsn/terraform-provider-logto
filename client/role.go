@@ -7,7 +7,7 @@ import (
 )
 
 func (c *Client) RoleGet(ctx context.Context, id string) (*RoleModel, error) {
-	if id == "" {
+	if !validID(id) {
 		return nil, errEmptyID
 	}
 
@@ -22,6 +22,7 @@ func (c *Client) RoleGet(ctx context.Context, id string) (*RoleModel, error) {
 	}
 
 	if res.StatusCode == 404 {
+		res.Body.Close()
 		return nil, nil
 	}
 
@@ -33,7 +34,7 @@ func (c *Client) RoleGet(ctx context.Context, id string) (*RoleModel, error) {
 }
 
 func (c *Client) RoleScopesGet(ctx context.Context, roleId string) ([]ScopeModel, error) {
-	if roleId == "" {
+	if !validID(roleId) {
 		return nil, errEmptyID
 	}
 
@@ -48,6 +49,7 @@ func (c *Client) RoleScopesGet(ctx context.Context, roleId string) ([]ScopeModel
 	}
 
 	if res.StatusCode == 404 {
+		res.Body.Close()
 		return nil, nil
 	}
 
@@ -78,7 +80,7 @@ func (c *Client) RoleCreate(ctx context.Context, role *RoleModel) (*RoleModel, e
 }
 
 func (c *Client) RoleDelete(ctx context.Context, id string) error {
-	if id == "" {
+	if !validID(id) {
 		return errEmptyID
 	}
 
@@ -87,19 +89,18 @@ func (c *Client) RoleDelete(ctx context.Context, id string) error {
 		path:   path.Join("api/roles", id),
 	}
 
-	_, err := expect(204)(c.do(ctx, req))
-	return err
+	return c.discard(ctx, req, 204, 404)
 }
 
 func (c *Client) RoleUpdate(ctx context.Context, role *RoleModel) (*RoleModel, error) {
-	if role.ID == "" {
+	if role == nil || !validID(role.ID) {
 		return nil, errEmptyID
 	}
 
 	req := &request{
 		method: http.MethodPatch,
 		path:   path.Join("api/roles", role.ID),
-		body:   role,
+		body:   map[string]any{"name": role.Name, "description": role.Description, "isDefault": role.IsDefault},
 	}
 
 	res, err := expect(200)(c.do(ctx, req))
@@ -112,4 +113,43 @@ func (c *Client) RoleUpdate(ctx context.Context, role *RoleModel) (*RoleModel, e
 		return nil, err
 	}
 	return &returnRole, nil
+}
+
+// RoleScopesUpdate reconciles relations in place, preserving role identity and memberships.
+func (c *Client) RoleScopesUpdate(ctx context.Context, roleID string, desired []string) error {
+	if !validID(roleID) {
+		return errEmptyID
+	}
+	current, err := c.RoleScopesGet(ctx, roleID)
+	if err != nil {
+		return err
+	}
+	existing, wanted := map[string]bool{}, map[string]bool{}
+	for _, scope := range current {
+		existing[scope.ID] = true
+	}
+	additions := []string{}
+	for _, id := range desired {
+		if !validID(id) {
+			return errEmptyID
+		}
+		if !wanted[id] && !existing[id] {
+			additions = append(additions, id)
+		}
+		wanted[id] = true
+	}
+	for _, scope := range current {
+		if !wanted[scope.ID] {
+			if err := c.discard(ctx, &request{method: http.MethodDelete, path: path.Join("api/roles", roleID, "scopes", scope.ID)}, 204, 404); err != nil {
+				return err
+			}
+		}
+	}
+	// Revoke obsolete grants first to respect quotas and fail closed on partial errors.
+	if len(additions) > 0 {
+		if err := c.discard(ctx, &request{method: http.MethodPost, path: path.Join("api/roles", roleID, "scopes"), body: map[string]any{"scopeIds": additions}}, 201); err != nil {
+			return err
+		}
+	}
+	return nil
 }

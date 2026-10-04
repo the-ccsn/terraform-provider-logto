@@ -49,6 +49,12 @@ func (r *apiResourceResource) Read(ctx context.Context, req resource.ReadRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Upjet observes a new resource before creation with an empty identifier.
+	// Treat only that uninitialized state as absent; malformed IDs still fail.
+	if state.Id.IsNull() || state.Id.IsUnknown() || state.Id.ValueString() == "" {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	apiResource, err := r.client.ApiResourceGet(ctx, state.Id.ValueString())
 	if err != nil {

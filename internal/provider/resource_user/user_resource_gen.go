@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -32,14 +33,20 @@ func UserResourceSchema(ctx context.Context) schema.Schema {
 			"name": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"primary_email": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
 				Description:         "Primary email address for the user. It should be unique across all users.",
 				MarkdownDescription: "Primary email address for the user. It should be unique across all users.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 				Validators: []validator.String{
-					stringvalidator.RegexMatches(regexp.MustCompile("^\\S+@\\S+\\.\\S+$"), ""),
+					stringvalidator.RegexMatches(regexp.MustCompile(`^$|^\S+@\S+\.\S+$`), ""),
 				},
 			},
 			"profile": schema.SingleNestedAttribute{
@@ -47,18 +54,30 @@ func UserResourceSchema(ctx context.Context) schema.Schema {
 					"family_name": schema.StringAttribute{
 						Optional: true,
 						Computed: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 					"given_name": schema.StringAttribute{
 						Optional: true,
 						Computed: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 					"middle_name": schema.StringAttribute{
 						Optional: true,
 						Computed: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 					"nickname": schema.StringAttribute{
 						Optional: true,
 						Computed: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 				},
 				CustomType: ProfileType{
@@ -68,6 +87,9 @@ func UserResourceSchema(ctx context.Context) schema.Schema {
 				},
 				Optional: true,
 				Computed: true,
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"role_ids": schema.SetAttribute{
 				ElementType:         types.StringType,
@@ -80,8 +102,11 @@ func UserResourceSchema(ctx context.Context) schema.Schema {
 				Computed:            true,
 				Description:         "Username for the user. It should be unique across all users.",
 				MarkdownDescription: "Username for the user. It should be unique across all users.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 				Validators: []validator.String{
-					stringvalidator.RegexMatches(regexp.MustCompile("^[A-Z_a-z]\\w*$"), ""),
+					stringvalidator.RegexMatches(regexp.MustCompile(`^$|^[A-Z_a-z]\w*$`), ""),
 				},
 			},
 		},
@@ -118,6 +143,13 @@ func (t ProfileType) String() string {
 }
 
 func (t ProfileType) ValueFromObject(ctx context.Context, in basetypes.ObjectValue) (basetypes.ObjectValuable, diag.Diagnostics) {
+	if in.IsNull() {
+		return NewProfileValueNull(), nil
+	}
+	if in.IsUnknown() {
+		return NewProfileValueUnknown(), nil
+	}
+
 	var diags diag.Diagnostics
 
 	attributes := in.Attributes()

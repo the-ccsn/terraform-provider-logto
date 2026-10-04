@@ -29,7 +29,8 @@
 					"name": "application_secret",
 					"string": {
 						"description": "The application secret for your instance, can be set as environment variable LOGTO_APPLICATION_SECRET.",
-						"optional_required": "optional"
+						"optional_required": "optional",
+						"sensitive": true
 					}
 				}
 			]
@@ -148,7 +149,7 @@
 												"path": "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 											}
 										],
-										"schema_definition": "stringvalidator.OneOf(\n\"Native\",\n\"SPA\",\n\"Traditional\",\n\"MachineToMachine\",\n\"Protected\",\n\"SAML\",\n)"
+										"schema_definition": "stringvalidator.OneOf(\n\"Native\",\n\"SPA\",\n\"Traditional\",\n\"MachineToMachine\",\n)"
 									}
 								}
 							]
@@ -215,6 +216,17 @@
 									}
 								}
 							]
+						}
+					},
+					{
+						"name": "client_secrets",
+						"map": {
+							"element_type": {
+								"string": {}
+							},
+							"computed_optional_required": "computed",
+							"sensitive": true,
+							"description": "Existing named client secrets. Read-only; no implicit rotation."
 						}
 					}
 				]

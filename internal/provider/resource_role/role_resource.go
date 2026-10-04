@@ -2,6 +2,7 @@ package resource_role
 
 import (
 	"context"
+	"sort"
 
 	"github.com/Lenstra/terraform-provider-logto/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -27,14 +28,23 @@ func (r *roleResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
+	// Persist the identifier before the secondary request so failures cannot orphan the role.
+	role.ScopeIds = decodePlan(ctx, plan).ScopeIds
+	resp.Diagnostics.Append(convertToTerraformModel(ctx, role, &state)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	roleScopes, err := r.client.RoleScopesGet(ctx, role.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Error fetching roleScopes just after role creation", err.Error())
 		return
 	}
 
-	for _, scope := range roleScopes {
-		role.ScopeIds = append(role.ScopeIds, scope.ID)
+	role.ScopeIds = nil
+	if !plan.ScopeIds.IsNull() {
+		role.ScopeIds = orderedScopeIDs(roleScopes, decodePlan(ctx, plan).ScopeIds)
 	}
 
 	diags = convertToTerraformModel(ctx, role, &state)
@@ -54,6 +64,12 @@ func (r *roleResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Upjet observes a new resource before creation with an empty identifier.
+	// Treat only that uninitialized state as absent; malformed IDs still fail.
+	if state.Id.IsNull() || state.Id.IsUnknown() || state.Id.ValueString() == "" {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	role, err := r.client.RoleGet(ctx, state.Id.ValueString())
 	if err != nil {
@@ -62,6 +78,7 @@ func (r *roleResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	}
 	if role == nil {
 		resp.State.RemoveResource(ctx)
+		return
 	}
 
 	roleScopes, err := r.client.RoleScopesGet(ctx, state.Id.ValueString())
@@ -70,14 +87,15 @@ func (r *roleResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	if len(roleScopes) == 0 {
+	if state.ScopeIds.IsNull() {
 		role.ScopeIds = nil
 	} else {
-		scopeIds := make([]string, 0, len(roleScopes))
-		for _, roleScope := range roleScopes {
-			scopeIds = append(scopeIds, roleScope.ID)
+		var previous []string
+		resp.Diagnostics.Append(state.ScopeIds.ElementsAs(ctx, &previous, false)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		role.ScopeIds = scopeIds
+		role.ScopeIds = orderedScopeIDs(roleScopes, previous)
 	}
 
 	diags = convertToTerraformModel(ctx, role, &state)
@@ -104,6 +122,15 @@ func (r *roleResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating role", err.Error())
 		return
+	}
+
+	// PATCH returns role fields only; reconcile relation endpoints without replacing the role.
+	role.ScopeIds = decodePlan(ctx, plan).ScopeIds
+	if !plan.ScopeIds.IsNull() && !plan.ScopeIds.IsUnknown() {
+		if err := r.client.RoleScopesUpdate(ctx, role.ID, role.ScopeIds); err != nil {
+			resp.Diagnostics.AddError("Error updating role scopes", err.Error())
+			return
+		}
 	}
 
 	diags = convertToTerraformModel(ctx, role, &state)
@@ -146,6 +173,7 @@ func decodePlan(ctx context.Context, plan RoleModel) *client.RoleModel {
 	}
 
 	if !plan.ScopeIds.IsNull() && !plan.ScopeIds.IsUnknown() {
+		model.ScopeIds = []string{}
 		plan.ScopeIds.ElementsAs(ctx, &model.ScopeIds, true)
 	}
 
@@ -175,4 +203,25 @@ func convertToTerraformModel(ctx context.Context, role *client.RoleModel, model 
 
 func convertList[E any](ctx context.Context, elementType attr.Type, list []E) (basetypes.ListValue, diag.Diagnostics) {
 	return basetypes.NewListValueFrom(ctx, elementType, list)
+}
+
+// Relation APIs return an unordered collection; Terraform lists must retain plan order.
+func orderedScopeIDs(scopes []client.ScopeModel, preferred []string) []string {
+	remaining := map[string]bool{}
+	for _, scope := range scopes {
+		remaining[scope.ID] = true
+	}
+	result := make([]string, 0, len(remaining))
+	for _, id := range preferred {
+		if remaining[id] {
+			result = append(result, id)
+			delete(remaining, id)
+		}
+	}
+	extra := make([]string, 0, len(remaining))
+	for id := range remaining {
+		extra = append(extra, id)
+	}
+	sort.Strings(extra)
+	return append(result, extra...)
 }

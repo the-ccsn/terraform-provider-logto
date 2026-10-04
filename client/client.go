@@ -7,15 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	utils "github.com/Lenstra/go-utils/http"
 	"github.com/rs/zerolog"
 )
 
@@ -24,10 +25,11 @@ const (
 )
 
 var (
-	errEmptyID = errors.New("id should not be empty")
+	errEmptyID = errors.New("identifier must be a nonempty path segment without reserved characters")
 )
 
 type Config struct {
+	Endpoint          string
 	Hostname          string
 	Resource          string
 	ApplicationID     string
@@ -59,6 +61,11 @@ type Client struct {
 }
 
 func NewClient(config *Config) (*Client, error) {
+	if config == nil {
+		return nil, errors.New("logto client configuration is required")
+	}
+	copyConfig := *config
+	config = &copyConfig
 	defConfig := DefaultConfig()
 	if config.Hostname == "" {
 		config.Hostname = defConfig.Hostname
@@ -85,9 +92,27 @@ func NewClient(config *Config) (*Client, error) {
 		return nil, fmt.Errorf("missing Logto hostname")
 	}
 
-	return &Client{
-		conf: config,
-	}, nil
+	if config.Endpoint == "" {
+		config.Endpoint = "https://" + config.Hostname
+	}
+	endpoint, err := url.Parse(config.Endpoint)
+	if err != nil || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || (endpoint.Path != "" && endpoint.Path != "/") {
+		return nil, errors.New("logto endpoint must be an origin without credentials, query, or path")
+	}
+	ip := net.ParseIP(endpoint.Hostname())
+	loopback := endpoint.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())
+	if endpoint.Scheme != "https" && !(endpoint.Scheme == "http" && loopback) {
+		return nil, errors.New("logto endpoint requires HTTPS (HTTP is allowed only on loopback for tests)")
+	}
+	config.Endpoint = strings.TrimRight(config.Endpoint, "/")
+	httpClient := *config.HttpClient
+	if httpClient.Timeout <= 0 {
+		httpClient.Timeout = 60 * time.Second
+	}
+	// Management credentials must never follow redirects to another origin.
+	httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	config.HttpClient = &httpClient
+	return &Client{conf: config}, nil
 }
 
 type request struct {
@@ -101,9 +126,19 @@ type request struct {
 }
 
 func (r *request) toHttpRequest(ctx context.Context, conf *Config) (*http.Request, error) {
-	reqUrl := fmt.Sprintf("https://%s/%s", conf.Hostname, r.path)
+	reqUrl := conf.Endpoint + "/" + r.path
 
-	req, err := http.NewRequestWithContext(ctx, r.method, reqUrl, nil)
+	var body io.Reader
+	if r.body != nil {
+		encoded, err := json.Marshal(r.body)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(encoded)
+	} else if r.rawBody != nil {
+		body = r.rawBody
+	}
+	req, err := http.NewRequestWithContext(ctx, r.method, reqUrl, body)
 	if err != nil {
 		return nil, err
 	}
@@ -115,17 +150,7 @@ func (r *request) toHttpRequest(ctx context.Context, conf *Config) (*http.Reques
 	req.URL.RawQuery = params.Encode()
 
 	if r.body != nil {
-		body, err := json.Marshal(r.body)
-		if err != nil {
-			return nil, err
-		}
-		req.Body = io.NopCloser(bytes.NewBuffer(body))
-
 		req.Header.Set("Content-Type", "application/json")
-	}
-
-	if r.rawBody != nil {
-		req.Body = io.NopCloser(r.rawBody)
 	}
 
 	for key, value := range r.headers {
@@ -138,7 +163,7 @@ func (r *request) toHttpRequest(ctx context.Context, conf *Config) (*http.Reques
 func (c *Client) getAccessToken(ctx context.Context) (string, error) {
 	c.accessTokenLock.Lock()
 	defer c.accessTokenLock.Unlock()
-	if c.accessToken != "" && c.accessTokenExpires.Before(time.Now()) {
+	if c.accessToken != "" && time.Now().Before(c.accessTokenExpires) {
 		return c.accessToken, nil
 	}
 
@@ -146,7 +171,6 @@ func (c *Client) getAccessToken(ctx context.Context) (string, error) {
 	data.Set("grant_type", "client_credentials")
 	data.Set("resource", c.conf.Resource)
 	data.Set("scope", "all")
-	data.Encode()
 
 	req := &request{
 		method:             "POST",
@@ -178,53 +202,162 @@ func (c *Client) getAccessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if decodedResponse.TokenType != tokenType {
-		return "", fmt.Errorf("unexpected token type %q, expected %q", decodedResponse.TokenType, tokenType)
+	if decodedResponse.TokenType != tokenType || decodedResponse.AccessToken == "" || decodedResponse.ExpiresIn <= 0 {
+		return "", errors.New("invalid token response: expected a nonempty Bearer token and positive expires_in")
 	}
 
 	c.accessToken = decodedResponse.AccessToken
-	c.accessTokenExpires = time.Now().Add(time.Duration(float64(decodedResponse.ExpiresIn) * 0.7))
+	c.accessTokenExpires = time.Now().Add(time.Duration(float64(decodedResponse.ExpiresIn)*0.7) * time.Second)
 	return c.accessToken, nil
 }
 
+// do retries reads only; a mutation may have committed even when its response is lost.
 func (c *Client) do(ctx context.Context, r *request) (*http.Response, error) {
-	req, err := r.toHttpRequest(ctx, c.conf)
-	if err != nil {
-		return nil, err
-	}
-
-	if r.application_id != "" {
-		req.SetBasicAuth(r.application_id, r.application_secret)
-	} else {
-		accessToken, err := c.getAccessToken(ctx)
+	refreshed := false
+	readRetries := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		req, err := r.toHttpRequest(ctx, c.conf)
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+		token := ""
+		if r.application_id != "" {
+			req.SetBasicAuth(r.application_id, r.application_secret)
+		} else {
+			token, err = c.getAccessToken(ctx)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := c.conf.HttpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == http.StatusUnauthorized && r.application_id == "" && !refreshed {
+			resp.Body.Close()
+			c.accessTokenLock.Lock()
+			if c.accessToken == token {
+				c.accessToken = ""
+			}
+			c.accessTokenLock.Unlock()
+			refreshed = true
+			continue
+		}
+		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout
+		if r.method != http.MethodGet || !retryable || readRetries >= 2 {
+			return resp, nil
+		}
+		delay := readRetryDelay(resp.Header.Get("Retry-After"), readRetries, time.Now())
+		resp.Body.Close()
+		readRetries++
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
+}
 
-	err = utils.LogRequest(c.conf.Logger.Trace(), req, nil)
-	if err != nil {
-		return nil, err
+func readRetryDelay(header string, attempt int, now time.Time) time.Duration {
+	header = strings.TrimSpace(header)
+	if seconds, err := strconv.Atoi(header); err == nil && seconds >= 0 {
+		// Clamp before multiplication so large headers cannot overflow Duration.
+		return time.Duration(min(seconds, 30)) * time.Second
 	}
-
-	resp, err := c.conf.HttpClient.Do(req)
-	if err != nil {
-		return nil, err
+	if date, err := http.ParseTime(header); err == nil {
+		return min(max(date.Sub(now), 0), 30*time.Second)
 	}
+	return time.Duration(100*(1<<attempt)) * time.Millisecond
+}
 
-	err = utils.LogResponse(c.conf.Logger.Trace(), resp, nil)
-	if err != nil {
-		return nil, err
+// HTTPError exposes status for recovery logic without including response bodies.
+type HTTPError struct{ StatusCode int }
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("Logto API returned HTTP %d", e.StatusCode) }
+func IsNotFound(err error) bool {
+	var e *HTTPError
+	return errors.As(err, &e) && e.StatusCode == http.StatusNotFound
+}
+
+// discard closes every success response and treats already absent deletes as success.
+func (c *Client) discard(ctx context.Context, r *request, codes ...int) error {
+	res, err := expect(codes...)(c.do(ctx, r))
+	if res != nil && res.Body != nil {
+		res.Body.Close()
 	}
-
-	return resp, nil
+	return err
 }
 
 func decode(r io.ReadCloser, out any) error {
 	defer r.Close()
 	dec := json.NewDecoder(r)
-	return dec.Decode(out)
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	switch model := out.(type) {
+	case *ApplicationModel:
+		if !validID(model.ID) {
+			return errors.New("application response missing ID")
+		}
+	case *ApiResourceModel:
+		if !validID(model.ID) {
+			return errors.New("API resource response missing ID")
+		}
+	case *UserModel:
+		if !validID(model.ID) {
+			return errors.New("user response missing ID")
+		}
+	case *RoleModel:
+		if !validID(model.ID) {
+			return errors.New("role response missing ID")
+		}
+	case *ScopeModel:
+		if !validID(model.ID) {
+			return errors.New("scope response missing ID")
+		}
+	case *[]ScopeModel:
+		if *model == nil {
+			return errors.New("scope list response must be a JSON array")
+		}
+		for _, row := range *model {
+			if !validID(row.ID) {
+				return errors.New("response contains an invalid identifier")
+			}
+		}
+	case *[]RoleModel:
+		if *model == nil {
+			return errors.New("role list response must be a JSON array")
+		}
+		for _, row := range *model {
+			if !validID(row.ID) {
+				return errors.New("response contains an invalid identifier")
+			}
+		}
+	case *[]Secret:
+		if *model == nil {
+			return errors.New("secret list response must be a JSON array")
+		}
+	case *[]ApiResourceModel:
+		if *model == nil {
+			return errors.New("resource list response must be a JSON array")
+		}
+		for _, row := range *model {
+			if !validID(row.ID) {
+				return errors.New("response contains an invalid identifier")
+			}
+		}
+	case *Secret:
+		if model.Name == "" || model.Value == "" {
+			return errors.New("secret response missing name or value")
+		}
+	}
+	return nil
 }
 
 func expect(codes ...int) func(*http.Response, error) (*http.Response, error) {
@@ -232,14 +365,23 @@ func expect(codes ...int) func(*http.Response, error) (*http.Response, error) {
 		if err != nil {
 			return nil, err
 		}
+		if res == nil {
+			return nil, errors.New("logto API returned no response")
+		}
 		if !slices.Contains(codes, res.StatusCode) {
-			message := fmt.Sprintf("got status code %s, expected status code in %v", res.Status, codes)
-			if res.StatusCode >= 400 {
-				content, _ := io.ReadAll(res.Body)
-				message += fmt.Sprintf(": %s", string(content))
+			if res.Body != nil {
+				res.Body.Close()
 			}
-			return res, errors.New(message)
+			return nil, &HTTPError{StatusCode: res.StatusCode}
 		}
 		return res, nil
 	}
+}
+
+// Reject ambiguous path segments before callers normalize paths with path.Join.
+func validID(id string) bool {
+	return id != "" && id != "." && id != ".." && !strings.ContainsAny(id, "/\\%?#\r\n")
+}
+func validSecretName(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\\r\n")
 }

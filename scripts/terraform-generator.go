@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -23,12 +29,12 @@ func main() {
 
 func Main() error {
 	ctx := context.Background()
-	spec, extra, err := tfgen.Load(ctx)
+	spec, _, err := tfgen.Load(ctx)
 	if err != nil {
 		return err
 	}
 
-	tfgen.Update(spec, extra)
+	// The checked-in specification is already merged and reviewed.
 
 	content, err := json.MarshalIndent(spec, "", "\t")
 	if err != nil {
@@ -44,12 +50,18 @@ func Main() error {
 	if err := generate(input, output); err != nil {
 		return err
 	}
-	return generateAdditionalFiles(output)
+	if err := patchObjectStateConversions(output); err != nil {
+		return err
+	}
+	if err := generateAdditionalFiles(output); err != nil {
+		return err
+	}
+	return exec.Command("gofmt", "-w", output).Run()
 }
 
 func generate(input, output string) error {
 	cmd := exec.Command(
-		"tfplugingen-framework",
+		"go", "run", "github.com/hashicorp/terraform-plugin-codegen-framework/cmd/tfplugingen-framework@v0.4.1",
 		"generate",
 		"all",
 		"--input="+input,
@@ -68,6 +80,10 @@ func generateAdditionalFiles(output string) error {
 
 	for _, entry := range entries {
 		if entry.IsDir() && strings.HasPrefix(entry.Name(), "resource_") {
+			// This resource owns its schema and implementation; it is not generated.
+			if entry.Name() == "resource_application_secret" {
+				continue
+			}
 			packageName := strings.TrimPrefix(entry.Name(), "resource_")
 			resourceName := toCamelCase(packageName)
 			path := fmt.Sprintf("internal/provider/%s/%s_resource_impl_gen.go", entry.Name(), packageName)
@@ -180,4 +196,60 @@ func toPascalCase(s string) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+// The pinned generator does not handle null/unknown objects in ValueFromObject.
+// Add the missing conversions structurally, before formatting the generated code.
+func patchObjectStateConversions(root string) error {
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, "_gen.go") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, content, 0)
+		if err != nil {
+			return err
+		}
+		type insertion struct {
+			offset int
+			text   string
+		}
+		edits := []insertion{}
+		constructors := map[string]bool{}
+		for _, declaration := range file.Decls {
+			if fn, ok := declaration.(*ast.FuncDecl); ok {
+				constructors[fn.Name.Name] = true
+			}
+		}
+		for _, declaration := range file.Decls {
+			fn, ok := declaration.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != "ValueFromObject" || fn.Recv == nil || fn.Body == nil {
+				continue
+			}
+			receiver, ok := fn.Recv.List[0].Type.(*ast.Ident)
+			if !ok || !strings.HasSuffix(receiver.Name, "Type") {
+				continue
+			}
+			name := strings.TrimSuffix(receiver.Name, "Type")
+			if !constructors["New"+name+"ValueNull"] || !constructors["New"+name+"ValueUnknown"] {
+				return fmt.Errorf("missing generated object constructors in %s", path)
+			}
+			edits = append(edits, insertion{fset.Position(fn.Body.Lbrace).Offset + 1, "\n\tif in.IsNull() { return New" + name + "ValueNull(), nil }\n\tif in.IsUnknown() { return New" + name + "ValueUnknown(), nil }\n"})
+		}
+		sort.Slice(edits, func(i, j int) bool { return edits[i].offset > edits[j].offset })
+		for _, edit := range edits {
+			content = append(append(append([]byte{}, content[:edit.offset]...), []byte(edit.text)...), content[edit.offset:]...)
+		}
+		if len(edits) > 0 {
+			return os.WriteFile(path, content, 0o644)
+		}
+		return nil
+	})
 }

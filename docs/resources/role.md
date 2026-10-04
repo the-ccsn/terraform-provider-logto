@@ -52,7 +52,7 @@ resource "logto_role" "test_role" {
 ### Optional
 
 - `is_default` (Boolean)
-- `scope_ids` (List of String) The initial API resource scopes assigned to the role.
+- `scope_ids` (List of String) API resource scopes assigned to the role. An empty list revokes all scopes; omission leaves them unmanaged. Changes preserve the role ID and memberships.
 - `type` (String) The type of the role. It cannot be changed after creation.
 
 ### Read-Only

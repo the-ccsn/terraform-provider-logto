@@ -35,7 +35,7 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 	resp.Diagnostics.Append(diags...)
 
 	if roleIds != nil {
-		err = r.client.AssignRolesForUser(ctx, roleIds, user.ID)
+		err = r.client.UpdateRolesForUser(ctx, roleIds, user.ID)
 		if err != nil {
 			resp.Diagnostics.AddError("Error during assignation of role(s) for user", err.Error())
 			return
@@ -52,6 +52,12 @@ func (r *userResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	// Upjet observes a new resource before creation with an empty identifier.
+	// Treat only that uninitialized state as absent; malformed IDs still fail.
+	if state.Id.IsNull() || state.Id.IsUnknown() || state.Id.ValueString() == "" {
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
@@ -123,21 +129,6 @@ func (r *userResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	if !state.RoleIds.IsNull() && !state.RoleIds.IsUnknown() {
-		roleIdslist, diag := convertSetToSlice(state.RoleIds)
-		resp.Diagnostics.Append(diag...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-
-		for _, roleId := range roleIdslist {
-			err := r.client.DeleteRolesForUser(ctx, roleId, state.Id.ValueString())
-			if err != nil {
-				resp.Diagnostics.AddError("Error when removing role from user", err.Error())
-			}
-		}
 	}
 
 	err := r.client.UserDelete(ctx, state.Id.ValueString())

@@ -1,59 +1,16 @@
-# Terraform Provider release workflow.
-name: Release
-
-# This GitHub action creates a release when a tag that matches the pattern
-# "v*" (e.g. v0.1.0) is created.
+name: Release readiness
 on:
-  push:
-    tags:
-      - "v*"
-
-# Releases need permissions to read and write the repository contents.
-# GitHub considers creating releases and uploading assets as writing contents.
+  workflow_dispatch:
 permissions:
-  contents: write
-  id-token: write
-
+  contents: read
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
-          # Allow goreleaser to access older tag information.
-          fetch-depth: 0
-      - uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
-        with:
-          go-version-file: "go.mod"
-          cache: true
-
-      - name: Get GPG secrets on Vault
-        id: get_gpg_on_vault
-        uses: hashicorp/vault-action@v3
-        with:
-          url: https://vault.lenstra.co
-          method: jwt
-          path: github
-          role: terraform-registry-gpg
-          caCertificate: ${{ secrets.LENSTRA_CRT }}
-          clientCertificate: ${{ secrets.CERT_PEM }}
-          clientKey: ${{ secrets.PRIVATE_KEY_PEM }}
-          secrets: |
-            secret/data/gpg/terraform_registry private_key ;
-            secret/data/gpg/terraform_registry passphrase
-
-      - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@01dd5d3ca463c7f10f7f4f7b4f177225ac661ee4 # v6.1.0
-        id: import_gpg
-        with:
-          gpg_private_key: ${{ steps.get_gpg_on_vault.outputs.private_key }}
-          passphrase: ${{ steps.get_gpg_on_vault.outputs.passphrase }}
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@286f3b13b1b49da4ac219696163fb8c1c93e1200 # v6.0.0
-        with:
-          args: release --clean
-        env:
-          # GitHub sets the GITHUB_TOKEN secret automatically.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          go-version: '1.26.8'
+      - run: make verify
+      - run: make security GOVULNCHECK='go run golang.org/x/vuln/cmd/govulncheck@v1.8.0'

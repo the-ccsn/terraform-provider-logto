@@ -38,6 +38,8 @@ resource "logto_application" "app" {
 
 ### Read-Only
 
+- `client_secrets` (Map of String, Sensitive) Existing named application secrets; read-only, without implicit rotation.
+
 - `id` (String) The unique identifier of the application.
 - `is_admin` (Boolean)
 - `tenant_id` (String)

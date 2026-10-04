@@ -27,6 +27,21 @@ func (r *applicationResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	diags = convertToTerraformModel(ctx, application, &state)
+	// Retain the created ID even if credential retrieval fails on a later request.
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !diags.HasError() {
+		resp.Diagnostics.Append(r.readSecrets(ctx, application, &state)...)
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -42,6 +57,12 @@ func (r *applicationResource) Read(ctx context.Context, req resource.ReadRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Upjet observes a new resource before creation with an empty identifier.
+	// Treat only that uninitialized state as absent; malformed IDs still fail.
+	if state.Id.IsNull() || state.Id.IsUnknown() || state.Id.ValueString() == "" {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	application, err := r.client.ApplicationGet(ctx, state.Id.ValueString())
 	if err != nil {
@@ -55,6 +76,12 @@ func (r *applicationResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	diags = convertToTerraformModel(ctx, application, &state)
+	if !diags.HasError() {
+		resp.Diagnostics.Append(r.readSecrets(ctx, application, &state)...)
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -79,6 +106,12 @@ func (r *applicationResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	diags = convertToTerraformModel(ctx, application, &state)
+	if !diags.HasError() {
+		resp.Diagnostics.Append(r.readSecrets(ctx, application, &state)...)
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(diags...)
 	if diags.HasError() {
 		return
@@ -123,13 +156,14 @@ func decodePlan(ctx context.Context, plan ApplicationModel) *client.ApplicationM
 
 func convertToTerraformModel(ctx context.Context, app *client.ApplicationModel, model *ApplicationModel) (diags diag.Diagnostics) {
 	*model = ApplicationModel{
-		Id:           types.StringValue(app.ID),
-		TenantId:     types.StringValue(app.TenantId),
-		Name:         types.StringValue(app.Name),
-		Description:  types.StringValue(app.Description),
-		Type:         types.StringValue(app.Type),
-		IsThirdParty: types.BoolValue(app.IsThirdParty),
-		IsAdmin:      types.BoolValue(app.IsAdmin),
+		ClientSecrets: types.MapNull(types.StringType),
+		Id:            types.StringValue(app.ID),
+		TenantId:      types.StringValue(app.TenantId),
+		Name:          types.StringValue(app.Name),
+		Description:   types.StringValue(app.Description),
+		Type:          types.StringValue(app.Type),
+		IsThirdParty:  types.BoolValue(app.IsThirdParty),
+		IsAdmin:       types.BoolValue(app.IsAdmin),
 	}
 
 	if app.OidcClientMetadata != nil {
@@ -160,4 +194,23 @@ func convertList[E any](ctx context.Context, elementType attr.Type, list []E) (b
 		return basetypes.NewListValueFrom(ctx, elementType, []attr.Value{})
 	}
 	return basetypes.NewListValueFrom(ctx, elementType, list)
+}
+
+// readSecrets reads existing credentials; public clients do not have secrets.
+func (r *applicationResource) readSecrets(ctx context.Context, app *client.ApplicationModel, model *ApplicationModel) diag.Diagnostics {
+	values := map[string]string{}
+	if app.Type != "Native" && app.Type != "SPA" {
+		secrets, err := r.client.GetApplicationSecrets(ctx, app.ID)
+		if err != nil {
+			var d diag.Diagnostics
+			d.AddError("Error reading application secrets", err.Error())
+			return d
+		}
+		for _, secret := range secrets {
+			values[secret.Name] = secret.Value
+		}
+	}
+	var d diag.Diagnostics
+	model.ClientSecrets, d = types.MapValueFrom(ctx, types.StringType, values)
+	return d
 }
