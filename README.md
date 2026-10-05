@@ -14,6 +14,12 @@ use a simulated transport. See [provider-upjet-logto](https://github.com/the-ccs
 CRDs, examples, regeneration and verification commands. Fork additions are not available from the upstream Terraform Registry release.
 The Go module path is retained for compatibility with the embedded Upjet provider.
 
+Migration additions include explicit resources for sign-in experience,
+account center, ID-token extended claims, OIDC session settings and connectors.
+Their configuration JSON owns only the specified fields. Connector configuration
+is sensitive; singleton deletion releases ownership without resetting settings.
+Applications also expose validated JSON for additional OIDC and token metadata.
+
 ## Quality gates
 
 `make verify` runs offline lifecycle and protocol tests with the race detector,
@@ -25,7 +31,7 @@ Acceptance tests remain opt-in and must target a disposable Logto tenant.
 `make generate` uses framework generator v0.4.1 and never fetches the moving
 Logto OpenAPI document. `config/provider_code_extra.json` and the OpenAPI mapping
 are retained as historical migration inputs; they no longer override the schema.
-The handwritten application-secret resource owns its schema and is excluded
+The handwritten application-secret and configuration resources own their schemas and are excluded
 from generated implementations. Review schema changes before regenerating Upjet.
 
 Role scope changes now reconcile relations in place. Empty scope or user role
@@ -48,8 +54,10 @@ production release gates.
 
 CI provisions Logto 1.40.1 and PostgreSQL 17.11 with temporary loopback-only
 credentials. Real protocol tests use the `integration` build tag and
-`LOGTO_TEST_CREDENTIALS`; `make test-integration` validates all six resources,
+`LOGTO_TEST_CREDENTIALS`; `make test-integration` validates the six original resources,
 import, pagination beyond 100 entries and unmanaged metadata preservation.
+It also verifies all five new configuration API contracts against Logto 1.40.1;
+offline protocol tests cover their create, update, import, read and deletion behavior.
 Do not use production credentials for acceptance tests.
 
 ## License
