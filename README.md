@@ -20,6 +20,13 @@ Their configuration JSON owns only the specified fields. Connector configuration
 is sensitive; singleton deletion releases ownership without resetting settings.
 Applications also expose validated JSON for additional OIDC and token metadata.
 
+`logto_application_user_consent_scopes` manages the allowed user profile scopes
+of a third-party application, including `profile` and `email`. One resource owns
+all user profile scopes of an application; API and organization consent scopes
+are preserved. Refresh detects drift, updates reconcile grants in place, and an
+explicit empty set revokes all user profile scopes. Import uses the application
+ID. Users still approve access on the consent screen.
+
 ## Quality gates
 
 `make verify` runs offline lifecycle and protocol tests with the race detector,
@@ -31,7 +38,7 @@ Acceptance tests remain opt-in and must target a disposable Logto tenant.
 `make generate` uses framework generator v0.4.1 and never fetches the moving
 Logto OpenAPI document. `config/provider_code_extra.json` and the OpenAPI mapping
 are retained as historical migration inputs; they no longer override the schema.
-The handwritten application-secret and configuration resources own their schemas and are excluded
+The handwritten application-secret, user-consent-scopes and configuration resources own their schemas and are excluded
 from generated implementations. Review schema changes before regenerating Upjet.
 
 Role scope changes now reconcile relations in place. Empty scope or user role
