@@ -4,9 +4,16 @@
   outputs = { self, nixpkgs }: {
     devShells = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: let
       pkgs = nixpkgs.legacyPackages.${system};
+      go = pkgs.go.overrideAttrs (_: {
+        version = "1.26.10";
+        src = pkgs.fetchurl {
+          url = "https://go.dev/dl/go1.26.10.src.tar.gz";
+          hash = "sha256-/WPog7ovK/ypPBZGsx6+9j4rHk0rMXyXidl2po2B828=";
+        };
+      });
     in {
       default = pkgs.mkShell {
-        packages = [ pkgs.go pkgs.gotools pkgs.go-tools pkgs.govulncheck pkgs.gnumake pkgs.opentofu pkgs.python3 pkgs.postgresql_17 pkgs.nodejs_22 pkgs.actionlint ];
+        packages = [ go pkgs.gotools pkgs.go-tools pkgs.govulncheck pkgs.gnumake pkgs.opentofu pkgs.python3 pkgs.postgresql_17 pkgs.nodejs_22 pkgs.actionlint ];
       };
     });
   };

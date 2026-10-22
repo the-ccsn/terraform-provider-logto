@@ -45,8 +45,8 @@ Role scope changes now reconcile relations in place. Empty scope or user role
 lists revoke all managed assignments. Application and user metadata PATCHes
 preserve fields that this fork does not manage. All deletes accept absence.
 
-The fork requires Go 1.25 or newer after security dependency upgrades. CI uses
-Go 1.26.8. Signed Terraform Registry releases remain disabled pending signing
+The fork requires Go 1.26.10 or newer after security dependency upgrades.
+Signed Terraform Registry releases remain disabled pending signing
 credentials and release validation; the manual release-readiness workflow only validates.
 
 Omitted optional fields preserve prior state during updates; use explicit empty
